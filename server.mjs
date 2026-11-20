@@ -1,4 +1,4 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, isAbsolute, relative, resolve } from 'node:path';
@@ -6,6 +6,59 @@ import { fileURLToPath } from 'node:url';
 
 const publicDir = resolve(fileURLToPath(new URL('./public/', import.meta.url)));
 const port = Number(process.env.PORT || 3000);
+const indexingEnabled = process.env.INDEXING_ENABLED === 'true';
+const robotsMeta = '<meta name="robots" content="noindex,nofollow">';
+const htmlTemplate = readFileSync(resolve(publicDir, 'index.html'), 'utf8');
+
+if (!htmlTemplate.includes(robotsMeta)) {
+  throw new Error('The HTML template must keep its pre-launch noindex tag');
+}
+
+function contactUrl(variable, allowedHosts = null) {
+  const value = process.env[variable]?.trim();
+  if (!value) return null;
+
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${variable} must be a valid HTTPS URL`);
+  }
+  if (url.protocol !== 'https:' || (allowedHosts && !allowedHosts.includes(url.hostname)) || url.username || url.password || url.port || (allowedHosts && url.pathname === '/')) {
+    throw new Error(`${variable} must be an HTTPS URL${allowedHosts ? ` on ${allowedHosts.join(' or ')}` : ''}`);
+  }
+  return url.href.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+}
+
+const contactUrls = {
+  telegram: contactUrl('TELEGRAM_URL', ['t.me']),
+  instagram: contactUrl('INSTAGRAM_URL')
+};
+
+const contactHtml = htmlTemplate.replace(/<a\b[^>]*\bdata-contact="(telegram|instagram)"[^>]*>/g, (tag, channel) => {
+  const url = contactUrls[channel];
+  if (!url) return tag;
+  if (!/\bhref="[^"]*"/.test(tag)) throw new Error(`Missing href for ${channel} contact link`);
+  return tag.replace(/\bhref="[^"]*"/, `href="${url}"`);
+});
+
+let publicSiteUrl;
+if (indexingEnabled) {
+  let url;
+  try {
+    url = new URL(process.env.PUBLIC_SITE_URL || '');
+  } catch {
+    throw new Error('PUBLIC_SITE_URL must be the final HTTPS site origin before enabling indexing');
+  }
+  if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('PUBLIC_SITE_URL must be a final HTTPS origin without a path, query or fragment');
+  }
+  publicSiteUrl = `${url.origin}/`;
+}
+
+const indexHtml = indexingEnabled
+  ? contactHtml.replace(robotsMeta, '<meta name="robots" content="index,follow">')
+  : contactHtml;
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('PORT must be a valid TCP port');
@@ -32,6 +85,18 @@ function respond(res, status, body, method = 'GET') {
   res.end(method === 'HEAD' ? undefined : body);
 }
 
+function respondPage(res, body, contentType, method = 'GET', extraHeaders = {}) {
+  const bytes = Buffer.from(body, 'utf8');
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Content-Length': bytes.length,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    ...extraHeaders
+  });
+  res.end(method === 'HEAD' ? undefined : bytes);
+}
+
 const server = createServer(async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     respond(res, 405, 'Method Not Allowed', req.method);
@@ -48,6 +113,28 @@ const server = createServer(async (req, res) => {
 
   if (pathname === '/healthz') {
     respond(res, 200, 'ok', req.method);
+    return;
+  }
+
+  if (pathname === '/robots.txt') {
+    const body = `User-agent: *\nAllow: /\n${indexingEnabled ? `Sitemap: ${publicSiteUrl}sitemap.xml\n` : ''}`;
+    respondPage(res, body, 'text/plain; charset=utf-8', req.method);
+    return;
+  }
+
+  if (pathname === '/sitemap.xml') {
+    if (!indexingEnabled) {
+      respond(res, 404, 'Not Found', req.method);
+      return;
+    }
+    const body = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${publicSiteUrl}</loc></url>\n</urlset>\n`;
+    respondPage(res, body, 'application/xml; charset=utf-8', req.method);
+    return;
+  }
+
+  if (pathname === '/' || pathname === '/index.html') {
+    respondPage(res, indexHtml, 'text/html; charset=utf-8', req.method,
+      indexingEnabled ? {} : { 'X-Robots-Tag': 'noindex, nofollow' });
     return;
   }
 
