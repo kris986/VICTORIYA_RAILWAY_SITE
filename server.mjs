@@ -14,7 +14,7 @@ if (!htmlTemplate.includes(robotsMeta)) {
   throw new Error('The HTML template must keep its pre-launch noindex tag');
 }
 
-function contactUrl(variable, allowedHosts) {
+function contactUrl(variable, allowedHosts = null) {
   const value = process.env[variable]?.trim();
   if (!value) return null;
 
@@ -22,17 +22,17 @@ function contactUrl(variable, allowedHosts) {
   try {
     url = new URL(value);
   } catch {
-    throw new Error(`${variable} must be a valid HTTPS profile URL`);
+    throw new Error(`${variable} must be a valid HTTPS URL`);
   }
-  if (url.protocol !== 'https:' || !allowedHosts.includes(url.hostname) || url.username || url.password || url.port || url.pathname === '/') {
-    throw new Error(`${variable} must be an HTTPS profile URL on ${allowedHosts.join(' or ')}`);
+  if (url.protocol !== 'https:' || (allowedHosts && !allowedHosts.includes(url.hostname)) || url.username || url.password || url.port || (allowedHosts && url.pathname === '/')) {
+    throw new Error(`${variable} must be an HTTPS URL${allowedHosts ? ` on ${allowedHosts.join(' or ')}` : ''}`);
   }
   return url.href.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
 }
 
 const contactUrls = {
   telegram: contactUrl('TELEGRAM_URL', ['t.me']),
-  instagram: contactUrl('INSTAGRAM_URL', ['instagram.com', 'www.instagram.com'])
+  instagram: contactUrl('INSTAGRAM_URL')
 };
 
 const contactHtml = htmlTemplate.replace(/<a\b[^>]*\bdata-contact="(telegram|instagram)"[^>]*>/g, (tag, channel) => {

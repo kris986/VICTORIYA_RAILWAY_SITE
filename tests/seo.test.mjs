@@ -81,7 +81,7 @@ test('launch mode serves configured contacts, canonical URL and sitemap', async 
     INDEXING_ENABLED: 'true',
     PUBLIC_SITE_URL: 'https://www.vektortaro.com/',
     TELEGRAM_URL: 'https://t.me/new_profile',
-    INSTAGRAM_URL: 'https://www.instagram.com/new_profile'
+    INSTAGRAM_URL: 'https://t.me/new_bot'
   }, async base => {
     const page = await fetch(base);
     const html = await page.text();
@@ -93,8 +93,8 @@ test('launch mode serves configured contacts, canonical URL and sitemap', async 
     assert.match(html, /<meta property="og:description" content="Онлайн-консультации Таро с Викторией:/);
     assert.match(html, /rel="icon" type="image\/png" sizes="64x64" href="favicon-64\.png"/);
     assert.match(html, /href="https:\/\/t\.me\/new_profile" data-contact="telegram" target="_blank"/);
-    assert.equal((html.match(/href="https:\/\/www\.instagram\.com\/new_profile" data-contact="instagram"/g) || []).length, 2);
-    assert.doesNotMatch(html, /href="https:\/\/www\.instagram\.com\/viktoria_tarotreader"/);
+    assert.equal((html.match(/href="https:\/\/t\.me\/new_bot" data-contact="instagram"/g) || []).length, 1);
+    assert.match(html, /href="https:\/\/www\.instagram\.com\/viktoria_tarotreader" target="_blank" rel="noopener noreferrer" aria-label="Instagram Виктории/);
     assert.equal(page.headers.get('x-robots-tag'), null);
 
     const favicon = await fetch(`${base}/favicon-64.png`);
